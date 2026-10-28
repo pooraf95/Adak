@@ -1,0 +1,35 @@
+@import url('https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --font-vazirmatn: 'Vazirmatn', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  color: var(--foreground);
+  background-color: var(--background);
+  font-family: var(--font-vazirmatn);
+  direction: rtl;
+  text-align: right;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+/* بهینه‌سازی تاچ و دکمه‌های بزرگ برای موبایل */
+button, input, select {
+  font-family: inherit;
+}
+
+/* عدم نمایش اسکرول بار برای تب‌های افقی */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
