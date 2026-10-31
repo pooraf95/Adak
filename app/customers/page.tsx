@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Customer } from '@/types/database';
 import { getCustomers, payCustomerDebt, updateCustomer, deleteCustomer } from '@/lib/dataService';
 import { formatToman, formatNumber, parsePersianNumber, formatShamsiDate } from '@/lib/utils';
+import { useAuth } from '@/lib/authContext';
 import { 
   Users, 
   UserPlus, 
@@ -22,6 +23,7 @@ import {
 import QuickCustomerModal from '@/components/QuickCustomerModal';
 
 export default function CustomersPage() {
+  const { isAdmin } = useAuth();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -85,6 +87,7 @@ export default function CustomersPage() {
 
   // ۱. باز کردن مودال ویرایش مشتری
   const handleOpenEdit = (c: Customer) => {
+    if (!isAdmin) return;
     setEditingCustomer(c);
     setEditName(c.name);
     setEditPhone(c.phone || '');
@@ -94,7 +97,7 @@ export default function CustomersPage() {
   // ۲. ذخیره ویرایش مشتری
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingCustomer || !editName.trim()) return;
+    if (!isAdmin || !editingCustomer || !editName.trim()) return;
 
     setIsUpdating(true);
     try {
@@ -115,6 +118,7 @@ export default function CustomersPage() {
 
   // ۳. حذف مشتری
   const handleDeleteCustomer = async (c: Customer) => {
+    if (!isAdmin) return;
     let confirmMsg = `آیا از حذف مشتری «${c.name}» اطمینان دارید؟`;
     if (c.total_debt > 0) {
       confirmMsg += `\n\nهشدار: این مشتری مبلغ ${formatToman(c.total_debt)} بدهی وصول‌نشده دارد!`;
@@ -286,24 +290,28 @@ export default function CustomersPage() {
                     </button>
                   )}
 
-                  {/* دکمه‌های ویرایش و حذف */}
-                  <button
-                    type="button"
-                    onClick={() => handleOpenEdit(c)}
-                    title="ویرایش مشتری"
-                    className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-xl transition-colors border border-slate-200/80"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                  </button>
+                  {/* دکمه‌های ویرایش و حذف فقط مخصوص مدیر */}
+                  {isAdmin && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEdit(c)}
+                        title="ویرایش مشتری"
+                        className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-xl transition-colors border border-slate-200/80"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
 
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteCustomer(c)}
-                    title="حذف مشتری"
-                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors border border-slate-200/80"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteCustomer(c)}
+                        title="حذف مشتری"
+                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors border border-slate-200/80"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             </div>

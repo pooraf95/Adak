@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from './supabase';
 import { Category, Product, Customer, Invoice, InvoiceItem, CartItem, CustomerPayment } from '@/types/database';
+import { formatShamsiDate } from './utils';
 
 // کلیدهای ذخیره‌سازی محلی در حالت دمو/آفلاین
 const LS_CATEGORIES = 'adak_categories';
@@ -579,7 +580,7 @@ export async function createInvoice(params: {
 
 export async function deleteInvoice(id: string): Promise<void> {
   if (isSupabaseConfigured()) {
-    // دریافت اطلاعات فاکتور جهت بازیابی انبار و کسر بدهی
+    // دریافت اطلاعات فاکتور جهت کسر بدهی در صورت وجود
     const { data: inv } = await supabase
       .from('invoices')
       .select('*, items:invoice_items(*)')
@@ -604,31 +605,9 @@ export async function deleteInvoice(id: string): Promise<void> {
             .eq('id', inv.customer_id);
         }
       }
-
-      // بازگشت موجودی به انبار
-      if (inv.items && inv.items.length > 0) {
-        for (const item of inv.items) {
-          if (item.product_id) {
-            const { data: prod } = await supabase
-              .from('products')
-              .select('stock_quantity')
-              .eq('id', item.product_id)
-              .single();
-            if (prod) {
-              await supabase
-                .from('products')
-                .update({
-                  stock_quantity: prod.stock_quantity + item.quantity,
-                  updated_at: new Date().toISOString(),
-                })
-                .eq('id', item.product_id);
-            }
-          }
-        }
-      }
     }
 
-    // حذف اقلام و فاکتور
+    // حذف اقلام (تریگر tr_restore_product_stock دیتابیس به صورت خودکار موجودی انبار را بازمی‌گرداند)
     await supabase.from('invoice_items').delete().eq('invoice_id', id);
     const { error } = await supabase.from('invoices').delete().eq('id', id);
     if (error) throw new Error(error.message);
@@ -708,6 +687,293 @@ export async function updateInvoice(
   });
   setLocal(LS_INVOICES, updatedList);
   return updatedList.find((inv) => inv.id === id)!;
+}
+
+// ثبت تعویض و مرجوعی کالا در فاکتور با اصلاح خودکار موجودی انبار و محاسبات مالی
+export interface ProcessExchangeParams {
+  invoiceId: string;
+  returnedItems: {
+    productId: string;
+    productName: string;
+    quantityToReturn: number;
+    unitPrice: number;
+    unitPurchasePrice: number;
+  }[];
+  newExchangeItems: {
+    productId: string;
+    productName: string;
+    quantity: number;
+    unitPrice: number;
+    unitPurchasePrice: number;
+  }[];
+  differenceMode: 'cash_received' | 'debt_added' | 'refund_paid' | 'debt_deducted' | 'even';
+  differenceAmount: number;
+  operatorName: string;
+  customerName?: string;
+  customNotes?: string;
+}
+
+export async function processInvoiceExchangeOrReturn(params: ProcessExchangeParams): Promise<Invoice> {
+  const {
+    invoiceId,
+    returnedItems,
+    newExchangeItems,
+    differenceMode,
+    differenceAmount,
+    operatorName,
+    customerName,
+    customNotes,
+  } = params;
+
+  // ۱. دریافت فاکتور فعلی
+  let currentInvoice: Invoice | null = null;
+  if (isSupabaseConfigured()) {
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('*, customer:customers(*), items:invoice_items(*)')
+      .eq('id', invoiceId)
+      .single();
+    if (error || !data) throw new Error('فاکتور برای تعویض/مرجوعی یافت نشد.');
+    currentInvoice = data;
+  } else {
+    const list = getLocal<Invoice[]>(LS_INVOICES, []);
+    currentInvoice = list.find((inv) => inv.id === invoiceId) || null;
+  }
+
+  if (!currentInvoice) {
+    throw new Error('فاکتور برای تعویض/مرجوعی یافت نشد.');
+  }
+
+  const existingItems = currentInvoice.items || [];
+
+  // ۲. محاسبه اقلام به‌روزرسانی شده
+  const remainingItems: Omit<InvoiceItem, 'id'>[] = [];
+  existingItems.forEach((it) => {
+    const ret = returnedItems.find((r) => r.productId === it.product_id);
+    const returnQty = ret ? Math.min(it.quantity, ret.quantityToReturn) : 0;
+    const remainingQty = it.quantity - returnQty;
+    if (remainingQty > 0) {
+      remainingItems.push({
+        invoice_id: invoiceId,
+        product_id: it.product_id,
+        product_name: it.product_name,
+        quantity: remainingQty,
+        unit_price: it.unit_price,
+        unit_purchase_price: it.unit_purchase_price,
+        total_price: remainingQty * it.unit_price,
+        total_purchase_cost: remainingQty * it.unit_purchase_price,
+      });
+    }
+  });
+
+  const newlyAddedItems: Omit<InvoiceItem, 'id'>[] = newExchangeItems
+    .filter((x) => x.quantity > 0)
+    .map((x) => ({
+      invoice_id: invoiceId,
+      product_id: x.productId,
+      product_name: x.productName,
+      quantity: x.quantity,
+      unit_price: x.unitPrice,
+      unit_purchase_price: x.unitPurchasePrice,
+      total_price: x.quantity * x.unitPrice,
+      total_purchase_cost: x.quantity * x.unitPurchasePrice,
+    }));
+
+  const allUpdatedItems = [...remainingItems, ...newlyAddedItems];
+
+  // ۳. محاسبه مبالغ جدید
+  const newTotalAmount = allUpdatedItems.reduce((sum, item) => sum + item.total_price, 0);
+  const newTotalPurchaseCost = allUpdatedItems.reduce(
+    (sum, item) => sum + item.total_purchase_cost,
+    0
+  );
+  const originalDiscount = currentInvoice.discount_amount || 0;
+  const newDiscountAmount = Math.min(originalDiscount, newTotalAmount);
+  const newFinalAmount = Math.max(0, newTotalAmount - newDiscountAmount);
+
+  let newPaidAmount = currentInvoice.paid_amount;
+  let newDebtAmount = currentInvoice.debt_amount;
+
+  if (differenceMode === 'cash_received') {
+    newPaidAmount = currentInvoice.paid_amount + differenceAmount;
+    newDebtAmount = Math.max(0, newFinalAmount - newPaidAmount);
+  } else if (differenceMode === 'debt_added') {
+    newDebtAmount = currentInvoice.debt_amount + differenceAmount;
+  } else if (differenceMode === 'refund_paid') {
+    newPaidAmount = Math.max(0, currentInvoice.paid_amount - differenceAmount);
+    newDebtAmount = Math.max(0, newFinalAmount - newPaidAmount);
+  } else if (differenceMode === 'debt_deducted') {
+    newDebtAmount = Math.max(0, currentInvoice.debt_amount - differenceAmount);
+  } else if (differenceMode === 'even') {
+    newPaidAmount = Math.min(currentInvoice.paid_amount, newFinalAmount);
+    newDebtAmount = Math.max(0, newFinalAmount - newPaidAmount);
+  }
+
+  let payment_status: 'paid' | 'partial' | 'credit' = 'paid';
+  if (newDebtAmount === 0) {
+    payment_status = 'paid';
+  } else if (newPaidAmount > 0) {
+    payment_status = 'partial';
+  } else {
+    payment_status = 'credit';
+  }
+  const netProfit = newFinalAmount - newTotalPurchaseCost;
+
+  // ۴. ساخت یادداشت رسمی تغییرات فاکتور
+  const nowShamsi = formatShamsiDate(new Date().toISOString());
+  const returnedSummary = returnedItems
+    .filter((r) => r.quantityToReturn > 0)
+    .map((r) => `${r.quantityToReturn} عدد ${r.productName}`)
+    .join('، ');
+  const exchangeSummary = newExchangeItems
+    .filter((x) => x.quantity > 0)
+    .map((x) => `${x.quantity} عدد ${x.productName}`)
+    .join('، ');
+
+  let diffSummary = '';
+  if (differenceAmount > 0) {
+    if (differenceMode === 'cash_received') diffSummary = `(مابه‌التفاوت: +${differenceAmount.toLocaleString('fa-IR')} تومان نقدی دریافت شد)`;
+    else if (differenceMode === 'debt_added') diffSummary = `(مابه‌التفاوت: +${differenceAmount.toLocaleString('fa-IR')} تومان به نسیه افزوده شد)`;
+    else if (differenceMode === 'refund_paid') diffSummary = `(مابه‌التفاوت: -${differenceAmount.toLocaleString('fa-IR')} تومان به مشتری عودت شد)`;
+    else if (differenceMode === 'debt_deducted') diffSummary = `(مابه‌التفاوت: -${differenceAmount.toLocaleString('fa-IR')} تومان از بدهی کسر شد)`;
+  } else {
+    diffSummary = '(تعویض سر به سر بدون مابه‌التفاوت)';
+  }
+
+  const parts = [];
+  if (returnedSummary) parts.push(`مرجوعی: ${returnedSummary}`);
+  if (exchangeSummary) parts.push(`تعویض با: ${exchangeSummary}`);
+  parts.push(diffSummary);
+
+  const actionLog = `[تعویض/مرجوعی (${operatorName} - ${nowShamsi}): ${parts.join(' | ')}]`;
+  const finalNotes = [currentInvoice.notes, actionLog, customNotes?.trim()].filter(Boolean).join('\n');
+
+  // ۵. ذخیره‌سازی در سوپابیس
+  if (isSupabaseConfigured()) {
+    // حذف اقلام قبلی (تریگر دیتابیس اقلام قبلی را به موجودی برمی‌گرداند)
+    await supabase.from('invoice_items').delete().eq('invoice_id', invoiceId);
+
+    // درج اقلام باقیمانده و جدید (تریگر دیتابیس اقلام جدید را از موجودی کسر می‌کند)
+    if (allUpdatedItems.length > 0) {
+      const { error: itemsErr } = await supabase.from('invoice_items').insert(
+        allUpdatedItems.map((it) => ({
+          invoice_id: invoiceId,
+          product_id: it.product_id,
+          product_name: it.product_name,
+          quantity: it.quantity,
+          unit_price: it.unit_price,
+          unit_purchase_price: it.unit_purchase_price,
+          total_price: it.total_price,
+          total_purchase_cost: it.total_purchase_cost,
+        }))
+      );
+      if (itemsErr) console.error('Error inserting updated items:', itemsErr);
+    }
+
+    // به‌روزرسانی فاکتور
+    const { data: updatedInv, error: invErr } = await supabase
+      .from('invoices')
+      .update({
+        customer_name: customerName?.trim() || currentInvoice.customer_name,
+        total_amount: newTotalAmount,
+        discount_amount: newDiscountAmount,
+        final_amount: newFinalAmount,
+        paid_amount: newPaidAmount,
+        debt_amount: newDebtAmount,
+        payment_status,
+        total_purchase_cost: newTotalPurchaseCost,
+        net_profit: netProfit,
+        notes: finalNotes,
+      })
+      .eq('id', invoiceId)
+      .select('*, customer:customers(*), items:invoice_items(*)')
+      .single();
+
+    if (invErr || !updatedInv) {
+      throw new Error(invErr?.message || 'خطا در ثبت تعویض فاکتور');
+    }
+
+    // به‌روزرسانی مانده بدهی مشتری در جدول customers در صورت تغییر
+    const deltaDebt = newDebtAmount - currentInvoice.debt_amount;
+    if (currentInvoice.customer_id && deltaDebt !== 0) {
+      const { data: cust } = await supabase
+        .from('customers')
+        .select('total_debt')
+        .eq('id', currentInvoice.customer_id)
+        .single();
+      if (cust) {
+        await supabase
+          .from('customers')
+          .update({
+            total_debt: Math.max(0, cust.total_debt + deltaDebt),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', currentInvoice.customer_id);
+      }
+    }
+
+    return updatedInv;
+  }
+
+  // ۶. ذخیره‌سازی محلی (حالت آفلاین)
+  const products = getLocal<Product[]>(LS_PRODUCTS, INITIAL_PRODUCTS);
+  returnedItems.forEach((ret) => {
+    if (ret.quantityToReturn > 0) {
+      const p = products.find((x) => x.id === ret.productId);
+      if (p) {
+        p.stock_quantity += ret.quantityToReturn;
+        p.updated_at = new Date().toISOString();
+      }
+    }
+  });
+  newExchangeItems.forEach((ex) => {
+    if (ex.quantity > 0) {
+      const p = products.find((x) => x.id === ex.productId);
+      if (p) {
+        p.stock_quantity = Math.max(0, p.stock_quantity - ex.quantity);
+        p.updated_at = new Date().toISOString();
+      }
+    }
+  });
+  setLocal(LS_PRODUCTS, products);
+
+  const deltaDebt = newDebtAmount - currentInvoice.debt_amount;
+  if (currentInvoice.customer_id && deltaDebt !== 0) {
+    const customers = getLocal<Customer[]>(LS_CUSTOMERS, INITIAL_CUSTOMERS);
+    const c = customers.find((x) => x.id === currentInvoice!.customer_id);
+    if (c) {
+      c.total_debt = Math.max(0, c.total_debt + deltaDebt);
+      c.updated_at = new Date().toISOString();
+      setLocal(LS_CUSTOMERS, customers);
+    }
+  }
+
+  const updatedInvoiceObj: Invoice = {
+    id: currentInvoice.id,
+    invoice_number: currentInvoice.invoice_number,
+    created_at: currentInvoice.created_at,
+    customer_id: currentInvoice.customer_id,
+    customer: currentInvoice.customer,
+    customer_name: customerName?.trim() || currentInvoice.customer_name,
+    total_amount: newTotalAmount,
+    discount_amount: newDiscountAmount,
+    final_amount: newFinalAmount,
+    paid_amount: newPaidAmount,
+    debt_amount: newDebtAmount,
+    payment_status,
+    total_purchase_cost: newTotalPurchaseCost,
+    net_profit: netProfit,
+    notes: finalNotes,
+    items: allUpdatedItems.map((it, idx) => ({ ...it, id: 'item_upd_' + idx + '_' + Date.now() })),
+  };
+
+  const invoices = getLocal<Invoice[]>(LS_INVOICES, []);
+  setLocal(
+    LS_INVOICES,
+    invoices.map((inv) => (inv.id === invoiceId ? updatedInvoiceObj : inv))
+  );
+
+  return updatedInvoiceObj;
 }
 
 // ======================= ۵. گزارش‌گیری (Reports) =======================

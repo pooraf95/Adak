@@ -89,14 +89,14 @@ export default function Navbar() {
                 <div className="text-right">
                   <div className="flex items-center gap-1">
                     <span className="text-xs font-bold text-slate-200">{user.username}</span>
-                    <span className={`text-[9px] px-1.5 py-0.2 rounded-md font-black ${
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-md font-black ${
                       isAdmin ? 'bg-amber-500 text-slate-950' : 'bg-blue-500 text-white'
                     }`}>
-                      {isAdmin ? 'مدیر' : 'پرسنل'}
+                      {isAdmin ? 'مدیر' : 'شاگرد'}
                     </span>
                   </div>
                   <span className="text-[10px] text-slate-400 hidden sm:block">
-                    {isAdmin ? 'دسترسی مالی و سود' : 'فروش و انبار'}
+                    {isAdmin ? 'مدیریت و دسترسی کامل' : 'ثبت فاکتور، مرجوعی و تعویض'}
                   </span>
                 </div>
 

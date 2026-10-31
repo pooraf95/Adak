@@ -138,8 +138,8 @@ export default function LoginScreen() {
               onClick={() => handleQuickLogin('Adak')}
               className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-bold transition-all text-center flex flex-col items-center gap-0.5"
             >
-              <span>آداک (صندوق‌دار)</span>
-              <span className="text-[10px] text-slate-400 font-normal">فروش و صندوق</span>
+              <span>آداک (شاگرد)</span>
+              <span className="text-[10px] text-slate-400 font-normal">فقط ثبت فاکتور و تعویض</span>
             </button>
           </div>
         </div>

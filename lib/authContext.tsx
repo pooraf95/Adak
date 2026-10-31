@@ -32,7 +32,7 @@ export const VALID_USERS = [
   {
     username: 'Adak',
     password: '123456',
-    name: 'آداک (صندوق‌دار و فروش)',
+    name: 'آداک (شاگرد / ثبت فاکتور و تعویض)',
     role: 'staff' as UserRole,
   },
 ];

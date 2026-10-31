@@ -87,6 +87,7 @@ export default function ProductsPage() {
   };
 
   const handleStockChange = async (productId: string, currentStock: number, delta: number) => {
+    if (!isAdmin) return;
     const updated = Math.max(0, currentStock + delta);
     setProducts((prev) =>
       prev.map((p) => (p.id === productId ? { ...p, stock_quantity: updated } : p))
@@ -97,7 +98,7 @@ export default function ProductsPage() {
   // ۱. ثبت محصول جدید
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!isAdmin || !name.trim()) return;
 
     setIsSubmitting(true);
     try {
@@ -243,32 +244,39 @@ export default function ProductsPage() {
         <div>
           <h2 className="font-extrabold text-lg text-slate-900 flex items-center gap-2">
             <Package className="w-5 h-5 text-amber-500" />
-            انبارداری و مدیریت اجناس بوتیک
+            انبارداری و موجودی اجناس بوتیک
           </h2>
           <p className="text-xs text-slate-500">
             {isAdmin 
               ? 'ثبت و ویرایش البسه، کنترل قیمت خرید، سود هر قلم و تغییر موجودی'
-              : 'ثبت و ویرایش البسه، قیمت فروش و تغییر موجودی انبار'}
+              : 'مشاهده موجودی انبار و استعلام قیمت فروش (تغییر موجودی، ثبت و ویرایش فقط توسط مدیر انجام می‌شود)'}
           </p>
         </div>
 
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <button
-            onClick={() => setShowCatModal(true)}
-            className="flex-1 sm:flex-initial py-2.5 px-3.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
-          >
-            <FolderEdit className="w-4 h-4 text-amber-600" />
-            مدیریت دسته‌بندی‌ها
-          </button>
-          
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex-1 sm:flex-initial py-2.5 px-4 rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            + افزودن جنس جدید
-          </button>
-        </div>
+        {isAdmin ? (
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => setShowCatModal(true)}
+              className="flex-1 sm:flex-initial py-2.5 px-3.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"
+            >
+              <FolderEdit className="w-4 h-4 text-amber-600" />
+              مدیریت دسته‌بندی‌ها
+            </button>
+            
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex-1 sm:flex-initial py-2.5 px-4 rounded-2xl bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-black shadow-md flex items-center justify-center gap-1.5 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              + افزودن جنس جدید
+            </button>
+          </div>
+        ) : (
+          <div className="bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-2xl text-[11px] font-bold text-amber-800 flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+            دسترسی مشاهده موجودی (شاگرد)
+          </div>
+        )}
       </div>
 
       {/* نوار جستجو و فیلتر دسته */}
@@ -348,51 +356,68 @@ export default function ProductsPage() {
 
               {/* بخش دکمه‌های عملیاتی (ویرایش، حذف و کنترل موجودی) */}
               <div className="flex items-center justify-between sm:justify-end gap-2.5 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
-                {/* دکمه‌های ویرایش و حذف */}
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => handleOpenEdit(prod)}
-                    className="p-2 rounded-xl text-slate-500 hover:text-amber-600 hover:bg-amber-50 border border-slate-200/80 transition-colors"
-                    title="ویرایش کالا"
-                  >
-                    <Edit2 className="w-4 h-4" />
-                  </button>
+                {isAdmin ? (
+                  <>
+                    {/* دکمه‌های ویرایش و حذف مخصوص مدیر */}
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenEdit(prod)}
+                        className="p-2 rounded-xl text-slate-500 hover:text-amber-600 hover:bg-amber-50 border border-slate-200/80 transition-colors"
+                        title="ویرایش کالا"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
 
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteProduct(prod)}
-                    className="p-2 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 border border-slate-200/80 transition-colors"
-                    title="حذف کالا"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteProduct(prod)}
+                        className="p-2 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 border border-slate-200/80 transition-colors"
+                        title="حذف کالا"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
 
-                {/* کنترل موجودی سریع لمسی (+ و -) */}
-                <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-xl border border-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => handleStockChange(prod.id, prod.stock_quantity, 1)}
-                    className="p-1.5 rounded-lg bg-white shadow-sm hover:bg-emerald-500 hover:text-white text-slate-700 transition-colors"
-                    title="افزایش ۱ عدد به موجودی"
-                  >
-                    <PlusCircle className="w-5 h-5" />
-                  </button>
+                    {/* کنترل موجودی سریع لمسی (+ و -) مخصوص مدیر */}
+                    <div className="flex items-center gap-1.5 bg-slate-50 p-1 rounded-xl border border-slate-200">
+                      <button
+                        type="button"
+                        onClick={() => handleStockChange(prod.id, prod.stock_quantity, 1)}
+                        className="p-1.5 rounded-lg bg-white shadow-sm hover:bg-emerald-500 hover:text-white text-slate-700 transition-colors"
+                        title="افزایش ۱ عدد به موجودی"
+                      >
+                        <PlusCircle className="w-5 h-5" />
+                      </button>
 
-                  <span className="px-2 font-black text-sm text-slate-900 min-w-8 text-center">
-                    {formatNumber(prod.stock_quantity)}
-                  </span>
+                      <span className="px-2 font-black text-sm text-slate-900 min-w-8 text-center">
+                        {formatNumber(prod.stock_quantity)}
+                      </span>
 
-                  <button
-                    type="button"
-                    onClick={() => handleStockChange(prod.id, prod.stock_quantity, -1)}
-                    className="p-1.5 rounded-lg bg-white shadow-sm hover:bg-red-500 hover:text-white text-slate-700 transition-colors"
-                    title="کاهش ۱ عدد از موجودی"
-                  >
-                    <MinusCircle className="w-5 h-5" />
-                  </button>
-                </div>
+                      <button
+                        type="button"
+                        onClick={() => handleStockChange(prod.id, prod.stock_quantity, -1)}
+                        className="p-1.5 rounded-lg bg-white shadow-sm hover:bg-red-500 hover:text-white text-slate-700 transition-colors"
+                        title="کاهش ۱ عدد از موجودی"
+                      >
+                        <MinusCircle className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  /* نمایش موجودی به صورت فقط-خواندنی برای شاگرد (عدم امکان کم و زیاد کردن موجودی) */
+                  <div className="flex items-center gap-2 bg-slate-50 px-3.5 py-2 rounded-xl border border-slate-200">
+                    <span className="text-xs text-slate-500 font-semibold">موجودی انبار:</span>
+                    <span className={`font-black text-sm ${prod.stock_quantity > 0 ? 'text-slate-900' : 'text-red-500'}`}>
+                      {formatNumber(prod.stock_quantity)} عدد
+                    </span>
+                    {prod.stock_quantity === 0 && (
+                      <span className="text-[10px] font-bold text-red-600 bg-red-100 px-1.5 py-0.5 rounded-md">
+                        ناموجود
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           ))}

@@ -78,3 +78,20 @@ export interface CartItem {
   unit_price: number;
   unit_purchase_price: number;
 }
+
+export interface ExchangeItemInput {
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  unitPurchasePrice: number;
+}
+
+export interface ReturnItemInput {
+  itemId?: string;
+  productId: string;
+  quantityToReturn: number;
+  unitPrice: number;
+  unitPurchasePrice: number;
+}
+
